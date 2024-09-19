@@ -217,9 +217,10 @@ def change_asset(_new_asset: address, swap_info: SwapInfo):
     self._paloma_check()
     old_asset: address = self.asset
     amount: uint256 = staticcall ERC20(old_asset).balanceOf(self)
+    old_a_asset_balance: uint256 = staticcall ERC20(self.a_asset).balanceOf(self)
     _amount: uint256 = 0
-    if amount > 0:
-        extcall AAVEPoolV3(Pool).withdraw(old_asset, staticcall ERC20(self.a_asset).balanceOf(self), self)
+    if old_a_asset_balance > 0:
+        extcall AAVEPoolV3(Pool).withdraw(old_asset, old_a_asset_balance, self)
         amount = staticcall ERC20(old_asset).balanceOf(self) - amount
         self._safe_approve(old_asset, Router, amount)
         _amount = staticcall ERC20(_new_asset).balanceOf(self)
