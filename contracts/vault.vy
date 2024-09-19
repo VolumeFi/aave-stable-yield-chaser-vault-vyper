@@ -65,11 +65,11 @@ Router: public(immutable(address))
 Pool: public(immutable(address))
 
 event Deposited:
-    user: address
+    depositor: address
     token0: address
     asset: address
     amount0: uint256
-    amount1: uint256
+    balance: uint256
 
 event UpdateAsset:
     old_asset: address
@@ -83,6 +83,7 @@ event Withdrawn:
     asset: address
     amount0: uint256
     amount1: uint256
+    balance: uint256
 
 event UpdateCompass:
     old_compass: address
@@ -109,6 +110,7 @@ event UpdateServiceFee:
 
 compass: public(address)
 asset: public(address)
+a_asset: public(address)
 totalSupply: public(uint256)
 balanceOf: public(HashMap[address, uint256])
 input_token: public(HashMap[address, address])
@@ -122,6 +124,7 @@ paloma: public(bytes32)
 def __init__(_compass: address, _weth: address, _asset: address, _router: address, _pool: address,  _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
     self.compass = _compass
     self.asset = _asset
+    self.a_asset = (staticcall AAVEPoolV3(Pool).getReserveData(_asset)).aTokenAddress
     self.refund_wallet = _refund_wallet
     self.gas_fee = _gas_fee
     self.service_fee_collector = _service_fee_collector
@@ -213,18 +216,20 @@ def _paloma_check():
 def change_asset(_new_asset: address, swap_info: SwapInfo):
     self._paloma_check()
     old_asset: address = self.asset
-    a_asset: address = (staticcall AAVEPoolV3(Pool).getReserveData(old_asset)).aTokenAddress
     amount: uint256 = staticcall ERC20(old_asset).balanceOf(self)
-    extcall AAVEPoolV3(Pool).withdraw(old_asset, staticcall ERC20(a_asset).balanceOf(self), self)
-    amount = staticcall ERC20(old_asset).balanceOf(self) - amount
-    self._safe_approve(old_asset, Router, amount)
-    _amount: uint256 = staticcall ERC20(_new_asset).balanceOf(self)
-    extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools)
-    _amount = staticcall ERC20(_new_asset).balanceOf(self) - _amount
-    assert _amount > 0, "Invalid swap"
-    self._safe_approve(_new_asset, Pool, _amount)
-    extcall AAVEPoolV3(Pool).supply(_new_asset, _amount, self, 0)
+    _amount: uint256 = 0
+    if amount > 0:
+        extcall AAVEPoolV3(Pool).withdraw(old_asset, staticcall ERC20(self.a_asset).balanceOf(self), self)
+        amount = staticcall ERC20(old_asset).balanceOf(self) - amount
+        self._safe_approve(old_asset, Router, amount)
+        _amount = staticcall ERC20(_new_asset).balanceOf(self)
+        extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools)
+        _amount = staticcall ERC20(_new_asset).balanceOf(self) - _amount
+        assert _amount > 0, "Invalid swap"
+        self._safe_approve(_new_asset, Pool, _amount)
+        extcall AAVEPoolV3(Pool).supply(_new_asset, _amount, self, 0)
     self.asset = _new_asset
+    self.a_asset = (staticcall AAVEPoolV3(Pool).getReserveData(_new_asset)).aTokenAddress
     log UpdateAsset(old_asset, _new_asset, amount, _amount)
 
 @external
@@ -235,41 +240,45 @@ def withdraw(swap_info: SwapInfo, receiver: address = msg.sender, output_token: 
     else:
         assert receiver == msg.sender, "Invalid receiver"
     _asset: address = self.asset
-    a_asset: address = (staticcall AAVEPoolV3(Pool).getReserveData(_asset)).aTokenAddress
-    a_balance: uint256 = staticcall ERC20(a_asset).balanceOf(self)
+    a_balance: uint256 = staticcall ERC20(self.a_asset).balanceOf(self)
     _amount: uint256 = self.balanceOf[receiver]
     assert _amount > 0, "Invalid withdraw"
     _total_supply: uint256 = self.totalSupply
     a_balance = a_balance * _amount // _total_supply
     self.balanceOf[receiver] = 0
     self.totalSupply = _total_supply - _amount
-    _balance: uint256 = staticcall ERC20(_asset).balanceOf(self)
+    asset_balance: uint256 = staticcall ERC20(_asset).balanceOf(self)
     extcall AAVEPoolV3(Pool).withdraw(_asset, a_balance, self)
-    _balance = staticcall ERC20(_asset).balanceOf(self) - _balance
+    asset_balance = staticcall ERC20(_asset).balanceOf(self) - asset_balance
     _output_token: address = output_token
+    out_amount: uint256 = 0
     if _output_token == empty(address):
         _output_token = self.input_token[receiver]
     if _output_token == _asset:
-        self._safe_transfer(_asset, receiver, _balance)
+        self._safe_transfer(_asset, receiver, asset_balance)
     elif _output_token == VETH and _asset == WETH:
-        extcall WrappedEth(WETH).withdraw(_balance)
-        send(receiver, _balance)
+        extcall WrappedEth(WETH).withdraw(asset_balance)
+        send(receiver, asset_balance)
     else:
-        self._safe_approve(_asset, Router, _balance)
+        self._safe_approve(_asset, Router, asset_balance)
         if _output_token == VETH:
-            _amount = self.balance
-            extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, _balance, swap_info.expected, swap_info.pools)
-            _amount = self.balance - _amount
-            assert _amount > 0, "Invalid swap"
-            send(receiver, _amount)
+            out_amount = self.balance
+            extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, asset_balance, swap_info.expected, swap_info.pools)
+            out_amount = self.balance - out_amount
+            assert out_amount > 0, "Invalid swap"
+            send(receiver, out_amount)
         else:
-            _amount = staticcall ERC20(_output_token).balanceOf(receiver)
-            extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, _balance, swap_info.expected, swap_info.pools)
-            _amount = staticcall ERC20(_output_token).balanceOf(receiver) - _amount
-            assert _amount > 0, "Invalid swap"
-            self._safe_transfer(_output_token, receiver, _amount)
-    log Withdrawn(receiver, _output_token, _asset, _amount, _balance)
+            out_amount = staticcall ERC20(_output_token).balanceOf(receiver)
+            extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, asset_balance, swap_info.expected, swap_info.pools)
+            out_amount = staticcall ERC20(_output_token).balanceOf(receiver) - out_amount
+            assert out_amount > 0, "Invalid swap"
+            self._safe_transfer(_output_token, receiver, out_amount)
+    log Withdrawn(receiver, _output_token, _asset, out_amount, asset_balance, _amount)
 
+@external
+@view
+def a_asset_balance() -> uint256:
+    return staticcall ERC20(self.a_asset).balanceOf(self)
 
 @external
 def update_compass(new_compass: address):
