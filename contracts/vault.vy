@@ -217,15 +217,17 @@ def change_asset(_new_asset: address, swap_info: SwapInfo):
     self._paloma_check()
     old_asset: address = self.asset
     amount: uint256 = staticcall ERC20(old_asset).balanceOf(self)
-    extcall AAVEPoolV3(Pool).withdraw(old_asset, staticcall ERC20(self.a_asset).balanceOf(self), self)
-    amount = staticcall ERC20(old_asset).balanceOf(self) - amount
-    self._safe_approve(old_asset, Router, amount)
-    _amount: uint256 = staticcall ERC20(_new_asset).balanceOf(self)
-    extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools)
-    _amount = staticcall ERC20(_new_asset).balanceOf(self) - _amount
-    assert _amount > 0, "Invalid swap"
-    self._safe_approve(_new_asset, Pool, _amount)
-    extcall AAVEPoolV3(Pool).supply(_new_asset, _amount, self, 0)
+    _amount: uint256 = 0
+    if amount > 0:
+        extcall AAVEPoolV3(Pool).withdraw(old_asset, staticcall ERC20(self.a_asset).balanceOf(self), self)
+        amount = staticcall ERC20(old_asset).balanceOf(self) - amount
+        self._safe_approve(old_asset, Router, amount)
+        _amount = staticcall ERC20(_new_asset).balanceOf(self)
+        extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools)
+        _amount = staticcall ERC20(_new_asset).balanceOf(self) - _amount
+        assert _amount > 0, "Invalid swap"
+        self._safe_approve(_new_asset, Pool, _amount)
+        extcall AAVEPoolV3(Pool).supply(_new_asset, _amount, self, 0)
     self.asset = _new_asset
     self.a_asset = (staticcall AAVEPoolV3(Pool).getReserveData(_new_asset)).aTokenAddress
     log UpdateAsset(old_asset, _new_asset, amount, _amount)
