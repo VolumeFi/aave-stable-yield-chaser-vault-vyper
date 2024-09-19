@@ -124,7 +124,6 @@ paloma: public(bytes32)
 def __init__(_compass: address, _weth: address, _asset: address, _router: address, _pool: address,  _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
     self.compass = _compass
     self.asset = _asset
-    self.a_asset = (staticcall AAVEPoolV3(Pool).getReserveData(_asset)).aTokenAddress
     self.refund_wallet = _refund_wallet
     self.gas_fee = _gas_fee
     self.service_fee_collector = _service_fee_collector
@@ -132,6 +131,7 @@ def __init__(_compass: address, _weth: address, _asset: address, _router: addres
     Router = _router
     WETH = _weth
     Pool = _pool
+    self.a_asset = (staticcall AAVEPoolV3(_pool).getReserveData(_asset)).aTokenAddress
     log UpdateAsset(empty(address), _asset, 0, 0)
     log UpdateCompass(empty(address), _compass)
     log UpdateRefundWallet(empty(address), _refund_wallet)
