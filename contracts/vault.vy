@@ -60,6 +60,7 @@ interface AAVEPoolV3:
     def withdraw(asset: address, amount: uint256, to: address) -> uint256: nonpayable
 
 VETH: constant(address) = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
+DENOMINATOR: constant(uint256) = 10 ** 18
 WETH: public(immutable(address))
 Router: public(immutable(address))
 Pool: public(immutable(address))
@@ -96,9 +97,9 @@ event UpdateRefundWallet:
 event SetPaloma:
     paloma: bytes32
 
-event UpdateGasFee:
-    old_gas_fee: uint256
-    new_gas_fee: uint256
+event UpdateEntranceFee:
+    old_entrance_fee: uint256
+    new_entrance_fee: uint256
 
 event UpdateServiceFeeCollector:
     old_service_fee_collector: address
@@ -115,18 +116,19 @@ totalSupply: public(uint256)
 balanceOf: public(HashMap[address, uint256])
 input_token: public(HashMap[address, address])
 refund_wallet: public(address)
-gas_fee: public(uint256)
+entrance_fee: public(uint256)
 service_fee_collector: public(address)
 service_fee: public(uint256)
 paloma: public(bytes32)
 
 @deploy
-def __init__(_compass: address, _weth: address, _asset: address, _router: address, _pool: address,  _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
+def __init__(_compass: address, _weth: address, _asset: address, _router: address, _pool: address,  _refund_wallet: address, _entrance_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
     self.compass = _compass
     self.asset = _asset
     self.refund_wallet = _refund_wallet
-    self.gas_fee = _gas_fee
+    self.entrance_fee = _entrance_fee
     self.service_fee_collector = _service_fee_collector
+    assert _service_fee < DENOMINATOR, "Invalid service fee"
     self.service_fee = _service_fee
     Router = _router
     WETH = _weth
@@ -135,7 +137,7 @@ def __init__(_compass: address, _weth: address, _asset: address, _router: addres
     log UpdateAsset(empty(address), _asset, 0, 0)
     log UpdateCompass(empty(address), _compass)
     log UpdateRefundWallet(empty(address), _refund_wallet)
-    log UpdateGasFee(0, _gas_fee)
+    log UpdateEntranceFee(0, _entrance_fee)
     log UpdateServiceFeeCollector(empty(address), _service_fee_collector)
     log UpdateServiceFee(0, _service_fee)
 
@@ -156,10 +158,10 @@ def _safe_transfer_from(_token: address, _from: address, _to: address, _value: u
 @nonreentrant
 def deposit(swap_info: SwapInfo):
     _value: uint256 = msg.value
-    _gas_fee: uint256 = self.gas_fee
-    if _gas_fee > 0:
-        _value -= _gas_fee
-        send(self.refund_wallet, _gas_fee)
+    _entrance_fee: uint256 = self.entrance_fee
+    if _entrance_fee > 0:
+        _value -= _entrance_fee
+        send(self.refund_wallet, _entrance_fee)
     _asset: address = self.asset
     _amount: uint256 = 0
     if swap_info.route[0] == _asset:
@@ -227,6 +229,10 @@ def change_asset(_new_asset: address, swap_info: SwapInfo):
         extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools)
         _amount = staticcall ERC20(_new_asset).balanceOf(self) - _amount
         assert _amount > 0, "Invalid swap"
+        _service_fee: uint256 = _amount * self.service_fee // DENOMINATOR
+        if _service_fee > 0:
+            self._safe_transfer(_new_asset, self.service_fee_collector, _service_fee)
+            _amount -= _service_fee
         self._safe_approve(_new_asset, Pool, _amount)
         extcall AAVEPoolV3(Pool).supply(_new_asset, _amount, self, 0)
     self.asset = _new_asset
@@ -302,11 +308,11 @@ def update_refund_wallet(new_refund_wallet: address):
     log UpdateRefundWallet(old_refund_wallet, new_refund_wallet)
 
 @external
-def update_gas_fee(new_gas_fee: uint256):
+def update_entrance_fee(new_entrance_fee: uint256):
     self._paloma_check()
-    old_gas_fee: uint256 = self.gas_fee
-    self.gas_fee = new_gas_fee
-    log UpdateGasFee(old_gas_fee, new_gas_fee)
+    old_entrance_fee: uint256 = self.entrance_fee
+    self.entrance_fee = new_entrance_fee
+    log UpdateEntranceFee(old_entrance_fee, new_entrance_fee)
 
 @external
 def update_service_fee_collector(new_service_fee_collector: address):
@@ -318,6 +324,7 @@ def update_service_fee_collector(new_service_fee_collector: address):
 @external
 def update_service_fee(new_service_fee: uint256):
     self._paloma_check()
+    assert new_service_fee < DENOMINATOR, "Invalid service fee"
     old_service_fee: uint256 = self.service_fee
     self.service_fee = new_service_fee
     log UpdateServiceFee(old_service_fee, new_service_fee)
