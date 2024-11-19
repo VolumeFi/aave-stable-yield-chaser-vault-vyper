@@ -218,6 +218,7 @@ def _paloma_check():
 def change_asset(_new_asset: address, swap_info: SwapInfo):
     self._paloma_check()
     old_asset: address = self.asset
+    assert old_asset != _new_asset, "Already updated asset"
     amount: uint256 = staticcall ERC20(old_asset).balanceOf(self)
     old_a_asset_balance: uint256 = staticcall ERC20(self.a_asset).balanceOf(self)
     _amount: uint256 = 0
@@ -238,6 +239,11 @@ def change_asset(_new_asset: address, swap_info: SwapInfo):
     self.asset = _new_asset
     self.a_asset = (staticcall AAVEPoolV3(Pool).getReserveData(_new_asset)).aTokenAddress
     log UpdateAsset(old_asset, _new_asset, amount, _amount)
+
+@external
+@view
+def asset_balance(owner: address) -> uint256:
+    return staticcall ERC20(self.a_asset).balanceOf(self) * self.balanceOf[owner] // self.totalSupply
 
 @external
 @nonreentrant
