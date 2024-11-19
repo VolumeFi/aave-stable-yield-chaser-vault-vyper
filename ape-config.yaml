@@ -1,1 +1,22 @@
 name: aave-stable-yield-chaser-vault-vyper
+
+vyper:
+  version: 0.4.0
+  evm_version: cancun
+
+geth:
+  bsc:
+    mainnet:
+      uri: https://bsc-dataseed1.binance.org/
+  gnosis:
+    mainnet:
+      uri: https://rpc.gnosischain.com/
+  arbitrum:
+    mainnet:
+      uri: https://arb1.arbitrum.io/rpc/
+  base:
+    mainnet:
+      uri: https://mainnet.base.org/
+  optimism:
+    mainnet:
+      uri: https://mainnet.optimism.io/
