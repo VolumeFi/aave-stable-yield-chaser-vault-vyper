@@ -34,8 +34,13 @@ struct ReserveData:
     unbacked: uint128
     isolationModeTotalDebt: uint128
 
+interface MintableERC20:
+    def mint(_to: address, _value: uint256): nonpayable
+    def burnFrom(_to: address, _value: uint256): nonpayable
+
 interface ERC20:
     def balanceOf(_owner: address) -> uint256: view
+    def totalSupply() -> uint256: view
     def approve(_spender: address, _value: uint256) -> bool: nonpayable
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
@@ -110,10 +115,9 @@ event UpdateServiceFee:
     new_service_fee: uint256
 
 compass: public(address)
+PYSC: public(immutable(address))
 asset: public(address)
 a_asset: public(address)
-totalSupply: public(uint256)
-balanceOf: public(HashMap[address, uint256])
 input_token: public(HashMap[address, address])
 refund_wallet: public(address)
 entrance_fee: public(uint256)
@@ -122,7 +126,7 @@ service_fee: public(uint256)
 paloma: public(bytes32)
 
 @deploy
-def __init__(_compass: address, _weth: address, _asset: address, _router: address, _pool: address,  _refund_wallet: address, _entrance_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
+def __init__(_compass: address, _weth: address, _asset: address, _router: address, _pool: address,  _refund_wallet: address, _entrance_fee: uint256, _service_fee_collector: address, _service_fee: uint256, pysc_blueprint: address):
     self.compass = _compass
     self.asset = _asset
     self.refund_wallet = _refund_wallet
@@ -134,6 +138,9 @@ def __init__(_compass: address, _weth: address, _asset: address, _router: addres
     WETH = _weth
     Pool = _pool
     self.a_asset = (staticcall AAVEPoolV3(_pool).getReserveData(_asset)).aTokenAddress
+    decimals: uint8 = 18
+    pysc: address = create_from_blueprint(pysc_blueprint, "Paloma Yield Stable Coin", "PYSC", decimals, _compass, code_offset=3)
+    PYSC = pysc
     log UpdateAsset(empty(address), _asset, 0, 0)
     log UpdateCompass(empty(address), _compass)
     log UpdateRefundWallet(empty(address), _refund_wallet)
@@ -196,18 +203,15 @@ def deposit(swap_info: SwapInfo):
     a_token: address = (staticcall AAVEPoolV3(Pool).getReserveData(_asset)).aTokenAddress
     before_a_balance: uint256 = staticcall ERC20(a_token).balanceOf(self)
     extcall AAVEPoolV3(Pool).supply(_asset, _amount, self, 0)
-    increased_a_balance: uint256 = staticcall ERC20(a_token).balanceOf(self) - before_a_balance
-    _total_supply: uint256 = self.totalSupply
+    _increased_balance: uint256 = staticcall ERC20(a_token).balanceOf(self) - before_a_balance
+    _total_supply: uint256 = staticcall ERC20(PYSC).totalSupply()
     if _total_supply == 0 or before_a_balance == 0:
-        self.totalSupply = increased_a_balance
-        self.balanceOf[msg.sender] = increased_a_balance
+        extcall MintableERC20(PYSC).mint(msg.sender, _increased_balance)
     else:
-        _increased_balance: uint256 = _total_supply * increased_a_balance // before_a_balance
-        _total_supply += _increased_balance
-        self.totalSupply = _total_supply
-        self.balanceOf[msg.sender] += _increased_balance
+        _increased_balance = _total_supply * _increased_balance // before_a_balance
+        extcall MintableERC20(PYSC).mint(msg.sender, _increased_balance)
     self.input_token[msg.sender] = swap_info.route[0]
-    log Deposited(msg.sender, swap_info.route[0], _asset, swap_info.amount, _amount)
+    log Deposited(msg.sender, swap_info.route[0], _asset, swap_info.amount, _increased_balance)
 
 @internal
 def _paloma_check():
@@ -243,7 +247,7 @@ def change_asset(_new_asset: address, swap_info: SwapInfo):
 @external
 @view
 def asset_balance(owner: address) -> uint256:
-    return staticcall ERC20(self.a_asset).balanceOf(self) * self.balanceOf[owner] // self.totalSupply
+    return staticcall ERC20(self.a_asset).balanceOf(self) * staticcall ERC20(PYSC).balanceOf(owner) // staticcall ERC20(PYSC).totalSupply()
 
 @external
 @nonreentrant
@@ -254,12 +258,11 @@ def withdraw(swap_info: SwapInfo, receiver: address = msg.sender, output_token: 
         assert receiver == msg.sender, "Invalid receiver"
     _asset: address = self.asset
     a_balance: uint256 = staticcall ERC20(self.a_asset).balanceOf(self)
-    _amount: uint256 = self.balanceOf[receiver]
+    _amount: uint256 = staticcall ERC20(PYSC).balanceOf(receiver)
     assert _amount > 0, "Invalid withdraw"
-    _total_supply: uint256 = self.totalSupply
+    _total_supply: uint256 = staticcall ERC20(PYSC).totalSupply()
     a_balance = a_balance * _amount // _total_supply
-    self.balanceOf[receiver] = 0
-    self.totalSupply = _total_supply - _amount
+    extcall MintableERC20(PYSC).burnFrom(receiver, _amount)
     asset_balance: uint256 = staticcall ERC20(_asset).balanceOf(self)
     extcall AAVEPoolV3(Pool).withdraw(_asset, a_balance, self)
     asset_balance = staticcall ERC20(_asset).balanceOf(self) - asset_balance
