@@ -270,6 +270,8 @@ def withdraw(swap_info: SwapInfo, receiver: address = msg.sender, output_token: 
     out_amount: uint256 = 0
     if _output_token == empty(address):
         _output_token = self.input_token[receiver]
+        if _output_token == empty(address):
+            _output_token = _asset
     if _output_token == _asset:
         self._safe_transfer(_asset, receiver, asset_balance)
     elif _output_token == VETH and _asset == WETH:
