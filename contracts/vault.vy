@@ -281,14 +281,13 @@ def withdraw(swap_info: SwapInfo, receiver: address = msg.sender, output_token: 
             out_amount = self.balance
             extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, asset_balance, swap_info.expected, swap_info.pools)
             out_amount = self.balance - out_amount
-            assert out_amount > 0, "Invalid swap"
             send(receiver, out_amount)
         else:
-            out_amount = staticcall ERC20(_output_token).balanceOf(receiver)
+            out_amount = staticcall ERC20(_output_token).balanceOf(self)
             extcall CurveSwapRouter(Router).exchange(swap_info.route, swap_info.swap_params, asset_balance, swap_info.expected, swap_info.pools)
-            out_amount = staticcall ERC20(_output_token).balanceOf(receiver) - out_amount
-            assert out_amount > 0, "Invalid swap"
+            out_amount = staticcall ERC20(_output_token).balanceOf(self) - out_amount
             self._safe_transfer(_output_token, receiver, out_amount)
+        assert out_amount > 0, "Invalid swap"
     log Withdrawn(receiver, _output_token, _asset, out_amount, asset_balance, _amount)
 
 @external
